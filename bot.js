@@ -384,7 +384,7 @@ async function postWarRoster(channel, type, rosterName, customIdPrefix, closeHou
 // ══════════════════════════════════════════════════════════════════════════════
 //  BOT READY
 // ══════════════════════════════════════════════════════════════════════════════
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log(`✅ Bot is online as ${client.user.tag}`);
 
   const informalChannel = await client.channels.fetch(INFORMAL_CHANNEL_ID).catch(() => null);
