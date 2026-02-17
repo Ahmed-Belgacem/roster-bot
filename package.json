@@ -1,0 +1,12 @@
+{
+  "name": "discord-roster-bot",
+  "version": "1.0.0",
+  "description": "Discord roster bot with join/leave buttons",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1"
+  }
+}
