@@ -13,6 +13,7 @@ const RPTICKET_CHANNEL_ID  = '1472887418138132550';
 const RATINGS_CHANNEL_ID   = '1472887535997947934';
 const FOUNDRY_CHANNEL_ID   = '1472887535997947934'; // same channel as ratings
 const VINEYARD_CHANNEL_ID  = '1472887509502529708';
+const NEWWEEK_CHANNEL_ID   = '1472898791580373032';
 
 // ─── Roster storage ────────────────────────────────────────────────────────────
 const rosters = new Map();
@@ -338,6 +339,7 @@ client.once('ready', async () => {
   const rpticketChannel  = await client.channels.fetch(RPTICKET_CHANNEL_ID).catch(() => null);
   const ratingsChannel   = await client.channels.fetch(RATINGS_CHANNEL_ID).catch(() => null);
   const vineyardChannel  = await client.channels.fetch(VINEYARD_CHANNEL_ID).catch(() => null);
+  const newweekChannel   = await client.channels.fetch(NEWWEEK_CHANNEL_ID).catch(() => null);
   // foundry uses same channel object as ratings
 
   if (!informalChannel)  console.error('❌ Cannot find informal channel');
@@ -345,6 +347,7 @@ client.once('ready', async () => {
   if (!rpticketChannel)  console.error('❌ Cannot find rp-ticket channel');
   if (!ratingsChannel)   console.error('❌ Cannot find ratings/foundry channel');
   if (!vineyardChannel)  console.error('❌ Cannot find vineyard channel');
+  if (!newweekChannel)   console.error('❌ Cannot find new week channel');
 
   // ── INFORMAL: every hour at :25 ──────────────────────────────────────────
   if (informalChannel) {
@@ -389,6 +392,35 @@ client.once('ready', async () => {
   // ── VINEYARD: 19:40 UK → 20:40 ───────────────────────────────────────────
   if (vineyardChannel) {
     scheduleDaily(19, 40, () => postWarRoster(vineyardChannel, 'vineyard', 'Vineyard-Roster', 'vineyard', 20, 40));
+  }
+
+  // ── NEW WEEK: every Monday at 04:00 UK ───────────────────────────────────
+  if (newweekChannel) {
+    const scheduleNewWeek = () => {
+      const now    = new Date();
+      const ukNow  = new Date(now.toLocaleString('en-GB', { timeZone: 'Europe/London' }));
+      const target = new Date(ukNow);
+
+      // Find next Monday
+      const daysUntilMonday = (1 - ukNow.getDay() + 7) % 7 || 7; // 1 = Monday
+      target.setDate(ukNow.getDate() + daysUntilMonday);
+      target.setHours(4, 0, 0, 0);
+
+      // If it's already Monday and before 4AM, post today
+      if (ukNow.getDay() === 1 && ukNow.getHours() < 4) {
+        target.setDate(ukNow.getDate());
+      }
+
+      const diffMs = target - ukNow;
+      console.log(`⏰ [NEW WEEK] fires in ${Math.round(diffMs/1000/60/60)} hours`);
+
+      setTimeout(async () => {
+        await newweekChannel.send('-------------------------------------------- NEW WEEK --------------------------------------------');
+        console.log('📅 New week message sent');
+        scheduleNewWeek(); // reschedule for next Monday
+      }, diffMs);
+    };
+    scheduleNewWeek();
   }
 });
 
