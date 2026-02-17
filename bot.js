@@ -50,7 +50,6 @@ client.on('messageCreate', async (message) => {
     const roster = [];
     const msg = await message.channel.send(buildRosterMessage(roster, new Date()));
     rosters.set(msg.id, { roster, channelId: message.channel.id, createdAt: new Date() });
-    // Delete the command message to keep chat clean
     message.delete().catch(() => {});
   }
 });
@@ -100,14 +99,30 @@ client.once('ready', async () => {
     return;
   }
 
-  // Auto-post a fresh roster every 30 seconds
-  // To switch to "every hour at :25" later, replace this with a cron job
-  setInterval(async () => {
-    const roster = [];
-    const msg = await channel.send(buildRosterMessage(roster, new Date()));
-    rosters.set(msg.id, { roster, channelId: channel.id, createdAt: new Date() });
-    console.log(`📋 Auto-posted new roster at ${new Date().toLocaleTimeString('en-GB')}`);
-  }, 30 * 1000); // 30,000ms = 30 seconds
+  // Auto-post every hour at minute :25 (e.g. 8:25, 9:25, 10:25...)
+  const scheduleNextPost = () => {
+    const now = new Date();
+    const nextPost = new Date();
+    nextPost.setMinutes(25, 0, 0);
+
+    // If :25 already passed this hour, move to next hour
+    if (now.getMinutes() >= 25) {
+      nextPost.setHours(nextPost.getHours() + 1);
+    }
+
+    const msUntilNext = nextPost - now;
+    console.log(`⏰ Next roster post in ${Math.round(msUntilNext / 1000 / 60)} minutes`);
+
+    setTimeout(async () => {
+      const roster = [];
+      const msg = await channel.send(buildRosterMessage(roster, new Date()));
+      rosters.set(msg.id, { roster, channelId: channel.id, createdAt: new Date() });
+      console.log(`📋 Auto-posted new roster at ${new Date().toLocaleTimeString('en-GB')}`);
+      scheduleNextPost(); // schedule the next one
+    }, msUntilNext);
+  };
+
+  scheduleNextPost();
 });
 
 client.login(TOKEN);
