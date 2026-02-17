@@ -14,7 +14,7 @@ const BIZWAR_CHANNEL_ID   = '1472887381723058248';
 // messageId -> { type, mainRoster, subsRoster, closed, channelId, createdAt, closeAt }
 const rosters = new Map();
 
-// ─── Helper: format date/time ──────────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 function formatDate(date) {
   return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
@@ -60,34 +60,42 @@ function buildInformalEmbed(mainRoster, createdAt, closed = false) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  BIZWAR ROSTER  (25 main + 10 subs)
+//  BIZWAR ROSTER  (25 main + 10 subs shown once main is full)
 // ══════════════════════════════════════════════════════════════════════════════
 function buildBizWarEmbed(mainRoster, subsRoster, createdAt, closeAt, closed = false) {
+  // Main roster lines (always 25 slots shown)
   const mainLines = [];
   for (let i = 1; i <= 25; i++) {
     const user = mainRoster[i - 1];
     mainLines.push(`**${i}.** ${user ? `<@${user.id}> | ${user.username}` : ''}`);
   }
 
-  const subLines = [];
-  for (let i = 1; i <= 10; i++) {
-    const user = subsRoster[i - 1];
-    subLines.push(`**${i}.** ${user ? `<@${user.id}> | ${user.username}` : ''}`);
-  }
+  const status = closed ? '🔴 CLOSED' : '🟢 Open';
+  const color  = closed ? 0xED4245 : 0x57F287;
+  const title  = closed ? '🔒 BizWar Roster (CLOSED)' : '✅ BizWar Roster';
+  const closeStr = closeAt ? `\n**Auto closes:** ${formatTime(closeAt)} UK` : '';
 
-  const status  = closed ? '🔴 CLOSED' : '🟢 Open';
-  const color   = closed ? 0xED4245 : 0x57F287;
-  const title   = closed ? '🔒 BizWar Roster (CLOSED)' : '✅ BizWar Roster';
-  const autoCloseStr = closeAt ? `**Auto closes:** ${formatTime(closeAt)} UK` : '';
+  // Subs section — only shown once main is full (25/25)
+  let subsSection = '';
+  if (mainRoster.length >= 25) {
+    const subLines = [];
+    for (let i = 1; i <= 10; i++) {
+      const user = subsRoster[i - 1];
+      subLines.push(`**${i}.** ${user ? `<@${user.id}> | ${user.username}` : ''}`);
+    }
+    subsSection = `\n\n**Subs Roster**\n${subLines.join('\n')}`;
+  } else {
+    subsSection = `\n\n**Subs Roster**\n*Opens when main roster is full (25/25)*`;
+  }
 
   const embed = new EmbedBuilder()
     .setTitle(title)
     .setDescription(
       `**Status:** ${status}\n` +
-      `**Created:** ${formatDate(createdAt)} • ${formatTime(createdAt)} UK\n` +
-      `${autoCloseStr}\n\n` +
-      `**Main Roster (1–25)**\n${mainLines.join('\n')}\n\n` +
-      `**Subs Roster**\n${subsRoster.length === 0 ? '*No Subs*' : subLines.filter((_, i) => subsRoster[i]).join('\n')}`
+      `**Created:** ${formatDate(createdAt)} • ${formatTime(createdAt)} UK` +
+      closeStr + `\n\n` +
+      `**Main Roster (1–25)**\n${mainLines.join('\n')}` +
+      subsSection
     )
     .setColor(color);
 
@@ -113,7 +121,6 @@ function buildBizWarEmbed(mainRoster, subsRoster, createdAt, closeAt, closed = f
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  // !roster → informal
   if (message.content === '!roster') {
     const mainRoster = [];
     const msg = await message.channel.send(buildInformalEmbed(mainRoster, new Date()));
@@ -121,7 +128,6 @@ client.on('messageCreate', async (message) => {
     message.delete().catch(() => {});
   }
 
-  // !bizwar → bizwar
   if (message.content === '!bizwar') {
     const mainRoster = [];
     const subsRoster = [];
@@ -150,7 +156,7 @@ client.on('interactionCreate', async (interaction) => {
   const userId   = interaction.user.id;
   const username = interaction.user.username;
 
-  // ── INFORMAL buttons ──
+  // ── INFORMAL ──────────────────────────────────────────────────────────────
   if (interaction.customId === 'informal_join') {
     if (data.mainRoster.find(u => u.id === userId))
       return interaction.reply({ content: '⚠️ You\'re already on the roster!', ephemeral: true });
@@ -170,49 +176,51 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.reply({ content: '✅ You\'ve been removed from the roster.', ephemeral: true });
   }
 
-  // ── BIZWAR buttons ──
+  // ── BIZWAR ────────────────────────────────────────────────────────────────
   if (interaction.customId === 'bizwar_join') {
     const inMain = data.mainRoster.find(u => u.id === userId);
     const inSubs = data.subsRoster.find(u => u.id === userId);
+
     if (inMain || inSubs)
       return interaction.reply({ content: '⚠️ You\'re already on the roster!', ephemeral: true });
 
+    // Main still has space
     if (data.mainRoster.length < 25) {
       data.mainRoster.push({ id: userId, username });
       await interaction.message.edit(buildBizWarEmbed(data.mainRoster, data.subsRoster, data.createdAt, data.closeAt, data.closed));
-      return interaction.reply({ content: '✅ Added to the **main roster**!', ephemeral: true });
-    } else if (data.subsRoster.length < 10) {
+      return interaction.reply({ content: '✅ Added to the **Main Roster**!', ephemeral: true });
+    }
+
+    // Main is full — join subs
+    if (data.subsRoster.length < 10) {
       data.subsRoster.push({ id: userId, username });
       await interaction.message.edit(buildBizWarEmbed(data.mainRoster, data.subsRoster, data.createdAt, data.closeAt, data.closed));
-      return interaction.reply({ content: '✅ Main roster is full — added to **Subs**!', ephemeral: true });
-    } else {
-      return interaction.reply({ content: '❌ Both the main roster and subs are full!', ephemeral: true });
+      return interaction.reply({ content: '✅ Main roster is full — you\'ve been added to **Subs**!', ephemeral: true });
     }
+
+    return interaction.reply({ content: '❌ Both the main roster and subs are full!', ephemeral: true });
   }
 
   if (interaction.customId === 'bizwar_leave') {
     const mainIndex = data.mainRoster.findIndex(u => u.id === userId);
     const subsIndex = data.subsRoster.findIndex(u => u.id === userId);
+
     if (mainIndex === -1 && subsIndex === -1)
       return interaction.reply({ content: '⚠️ You\'re not on the roster.', ephemeral: true });
 
     if (mainIndex !== -1) {
       data.mainRoster.splice(mainIndex, 1);
-      // promote first sub to main if there is one
-      if (data.subsRoster.length > 0) {
-        const promoted = data.subsRoster.shift();
-        data.mainRoster.push(promoted);
-      }
     } else {
       data.subsRoster.splice(subsIndex, 1);
     }
+
     await interaction.message.edit(buildBizWarEmbed(data.mainRoster, data.subsRoster, data.createdAt, data.closeAt, data.closed));
     return interaction.reply({ content: '✅ You\'ve been removed from the roster.', ephemeral: true });
   }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  CLOSE HELPER  — edits embed to CLOSED + disables buttons
+//  CLOSE ROSTER
 // ══════════════════════════════════════════════════════════════════════════════
 async function closeRoster(msgId) {
   const data = rosters.get(msgId);
@@ -234,21 +242,18 @@ async function closeRoster(msgId) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  SCHEDULE HELPER  — fires callback at next occurrence of HH:MM (UK time)
+//  SCHEDULE HELPER — fires callback at next HH:MM UK time, repeats daily
 // ══════════════════════════════════════════════════════════════════════════════
 function scheduleDaily(hour, minute, callback) {
   const fire = () => {
-    // Use UK time offset: UTC+0 in winter, UTC+1 in summer
-    // Railway runs UTC — we compute "next HH:MM UK" manually
-    const now     = new Date();
-    const ukNow   = new Date(now.toLocaleString('en-GB', { timeZone: 'Europe/London' }));
-    const target  = new Date(ukNow);
+    const now    = new Date();
+    const ukNow  = new Date(now.toLocaleString('en-GB', { timeZone: 'Europe/London' }));
+    const target = new Date(ukNow);
     target.setHours(hour, minute, 0, 0);
     if (ukNow >= target) target.setDate(target.getDate() + 1);
 
-    // Convert back to ms delay
     const diffMs = target - ukNow;
-    console.log(`⏰ [${hour}:${String(minute).padStart(2,'0')} UK] fires in ${Math.round(diffMs/1000/60)} min`);
+    console.log(`⏰ [${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')} UK] fires in ${Math.round(diffMs/1000/60)} min`);
 
     setTimeout(() => {
       callback();
@@ -264,14 +269,13 @@ function scheduleDaily(hour, minute, callback) {
 client.once('ready', async () => {
   console.log(`✅ Bot is online as ${client.user.tag}`);
 
-  // ── Fetch channels ──
   const informalChannel = await client.channels.fetch(INFORMAL_CHANNEL_ID).catch(() => null);
   const bizwarChannel   = await client.channels.fetch(BIZWAR_CHANNEL_ID).catch(() => null);
 
   if (!informalChannel) console.error('❌ Cannot find informal channel');
   if (!bizwarChannel)   console.error('❌ Cannot find bizwar channel');
 
-  // ── INFORMAL: post every hour at :25 ──
+  // ── INFORMAL: every hour at :25 ──────────────────────────────────────────
   if (informalChannel) {
     const postInformal = async () => {
       const mainRoster = [];
@@ -280,10 +284,9 @@ client.once('ready', async () => {
       console.log(`📋 Informal roster posted`);
     };
 
-    // Schedule every hour at :25
     const scheduleInformal = () => {
-      const now      = new Date();
-      const next     = new Date();
+      const now  = new Date();
+      const next = new Date();
       next.setMinutes(25, 0, 0);
       if (now.getMinutes() >= 25) next.setHours(next.getHours() + 1);
       const ms = next - now;
@@ -293,33 +296,29 @@ client.once('ready', async () => {
     scheduleInformal();
   }
 
-  // ── BIZWAR: post at 18:30 UK, close at 19:15 UK ──
-  //            post at 00:30 UK, close at 01:20 UK ──
+  // ── BIZWAR: 18:30 UK (closes 19:15) and 00:30 UK (closes 01:20) ──────────
   if (bizwarChannel) {
     const postBizWar = async (closeHour, closeMinute) => {
       const mainRoster = [];
       const subsRoster = [];
       const createdAt  = new Date();
 
-      // Calculate closeAt time for display
       const ukNow  = new Date(createdAt.toLocaleString('en-GB', { timeZone: 'Europe/London' }));
       const closeAt = new Date(ukNow);
       closeAt.setHours(closeHour, closeMinute, 0, 0);
 
-      const msg = await bizwarChannel.send(buildBizWarEmbed(mainRoster, subsRoster, createdAt, closeAt));
+      const msg   = await bizwarChannel.send(buildBizWarEmbed(mainRoster, subsRoster, createdAt, closeAt));
       const msgId = msg.id;
       rosters.set(msgId, { type: 'bizwar', mainRoster, subsRoster, closed: false, channelId: bizwarChannel.id, createdAt, closeAt });
-      console.log(`📋 BizWar roster posted — auto-closes at ${closeHour}:${String(closeMinute).padStart(2,'0')} UK`);
+      console.log(`📋 BizWar roster posted — closes at ${closeHour}:${String(closeMinute).padStart(2,'0')} UK`);
 
-      // Schedule auto-close for this specific post
+      // Auto-close after the right delay
       const msUntilClose = closeAt - ukNow;
       setTimeout(() => closeRoster(msgId), msUntilClose);
     };
 
-    // 18:30 UK post → closes 19:15 UK
     scheduleDaily(18, 30, () => postBizWar(19, 15));
-    // 00:30 UK post → closes 01:20 UK
-    scheduleDaily(0, 30, () => postBizWar(1, 20));
+    scheduleDaily(0,  30, () => postBizWar(1,  20));
   }
 });
 
