@@ -7,27 +7,40 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 
 // ─── Channel IDs ───────────────────────────────────────────────────────────────
-const INFORMAL_CHANNEL_ID  = '1473037750713454712';
-const BIZWAR_CHANNEL_ID    = '1472887381723058248';
-const RPTICKET_CHANNEL_ID  = '1472887418138132550';
-const RATINGS_CHANNEL_ID   = '1472887535997947934';
-const FOUNDRY_CHANNEL_ID   = '1472887535997947934'; // same channel as ratings
-const VINEYARD_CHANNEL_ID  = '1472887509502529708';
-const NEWWEEK_CHANNEL_ID   = '1472898791580373032';
+const INFORMAL_CHANNEL_ID = '1473037750713454712';
+const BIZWAR_CHANNEL_ID   = '1472887381723058248';
+const RPTICKET_CHANNEL_ID = '1472887418138132550';
+const RATINGS_CHANNEL_ID  = '1472887535997947934'; // also used for The Foundry
+const VINEYARD_CHANNEL_ID = '1472887509502529708';
+const NEWWEEK_CHANNEL_ID  = '1472898791580373032';
 
 // ─── Roster storage ────────────────────────────────────────────────────────────
 const rosters = new Map();
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
+// Always display times in UK timezone (handles both GMT and BST automatically)
 function formatDate(date) {
-  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString('en-GB', { timeZone: 'Europe/London', day: '2-digit', month: 'short', year: 'numeric' });
 }
 function formatTime(date) {
-  return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' });
+}
+
+// Returns current time as a real Date, and current UK time components
+function getUKTime() {
+  const now = new Date();
+  const ukStr = now.toLocaleString('en-US', { timeZone: 'Europe/London', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  // ukStr format: "MM/DD/YYYY, HH:MM:SS"
+  const [datePart, timePart] = ukStr.split(', ');
+  const [month, day, year]   = datePart.split('/').map(Number);
+  const [hour, minute, second] = timePart.split(':').map(Number);
+  return { now, year, month, day, hour, minute, second, dayOfWeek: new Date(year, month - 1, day).getDay() };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  INFORMAL ROSTER  (10 slots, no subs)
+//  INFORMAL ROSTER  (10 slots, no subs, no auto-close)
 // ══════════════════════════════════════════════════════════════════════════════
 function buildInformalEmbed(mainRoster, createdAt, closed = false) {
   const lines = [];
@@ -56,7 +69,7 @@ function buildInformalEmbed(mainRoster, createdAt, closed = false) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  SHARED: builds a 25+10 roster embed
+//  SHARED: builds a 25 main + 10 subs roster embed
 // ══════════════════════════════════════════════════════════════════════════════
 function buildWarEmbed(name, customIdPrefix, mainRoster, subsRoster, createdAt, closeAt, closed = false) {
   const mainLines = [];
@@ -70,7 +83,7 @@ function buildWarEmbed(name, customIdPrefix, mainRoster, subsRoster, createdAt, 
   const title    = closed ? `🔒 ${name} (CLOSED)` : `✅ ${name}`;
   const closeStr = closeAt ? `\n**Auto closes:** ${formatTime(closeAt)} UK` : '';
 
-  let subsSection = '';
+  let subsSection;
   if (mainRoster.length >= 25) {
     const subLines = [];
     for (let i = 1; i <= 10; i++) {
@@ -151,15 +164,13 @@ client.on('messageCreate', async (message) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  SHARED JOIN/LEAVE HANDLER
+//  SHARED JOIN/LEAVE HANDLERS
 // ══════════════════════════════════════════════════════════════════════════════
 async function handleWarJoin(interaction, data, rosterName, customIdPrefix) {
   const userId   = interaction.user.id;
   const username = interaction.user.username;
-  const inMain   = data.mainRoster.find(u => u.id === userId);
-  const inSubs   = data.subsRoster.find(u => u.id === userId);
 
-  if (inMain || inSubs)
+  if (data.mainRoster.find(u => u.id === userId) || data.subsRoster.find(u => u.id === userId))
     return interaction.reply({ content: '⚠️ You\'re already on the roster!', ephemeral: true });
 
   if (data.mainRoster.length < 25) {
@@ -218,7 +229,6 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.message.edit(buildInformalEmbed(data.mainRoster, data.createdAt, data.closed));
     return interaction.reply({ content: '✅ You\'ve been added to the roster!', ephemeral: true });
   }
-
   if (interaction.customId === 'informal_leave') {
     const index = data.mainRoster.findIndex(u => u.id === userId);
     if (index === -1)
@@ -260,8 +270,16 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  CLOSE ROSTER
+//  CLOSE ROSTER — marks closed, edits embed red, disables buttons
 // ══════════════════════════════════════════════════════════════════════════════
+const nameMap = {
+  bizwar:   'BizWar Roster',
+  rpticket: 'RP-Ticket Roster',
+  ratings:  'Ratings-Roster',
+  foundry:  'The Foundry-Roster',
+  vineyard: 'Vineyard-Roster',
+};
+
 async function closeRoster(msgId) {
   const data = rosters.get(msgId);
   if (!data || data.closed) return;
@@ -270,62 +288,74 @@ async function closeRoster(msgId) {
   try {
     const ch  = await client.channels.fetch(data.channelId);
     const msg = await ch.messages.fetch(msgId);
-
     if (data.type === 'informal') {
       await msg.edit(buildInformalEmbed(data.mainRoster, data.createdAt, true));
     } else {
-      const nameMap = {
-        bizwar:   'BizWar Roster',
-        rpticket: 'RP-Ticket Roster',
-        ratings:  'Ratings-Roster',
-        foundry:  'The Foundry-Roster',
-        vineyard: 'Vineyard-Roster',
-      };
       await msg.edit(buildWarEmbed(nameMap[data.type], data.type, data.mainRoster, data.subsRoster, data.createdAt, data.closeAt, true));
     }
-    console.log(`🔒 Closed roster ${msgId}`);
+    console.log(`🔒 Closed roster ${msgId} (${data.type})`);
   } catch (e) {
-    console.error('Failed to close roster:', e.message);
+    console.error(`Failed to close roster ${msgId}:`, e.message);
   }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  SCHEDULE HELPER — fires at next HH:MM UK, repeats daily
+//  SCHEDULE HELPER — fires callback at HH:MM UK time, repeats daily
+//  Uses real UTC math with Europe/London offset to handle GMT/BST automatically
 // ══════════════════════════════════════════════════════════════════════════════
 function scheduleDaily(hour, minute, callback) {
-  const fire = () => {
-    const now    = new Date();
-    const ukNow  = new Date(now.toLocaleString('en-GB', { timeZone: 'Europe/London' }));
-    const target = new Date(ukNow);
-    target.setHours(hour, minute, 0, 0);
-    if (ukNow >= target) target.setDate(target.getDate() + 1);
+  const fire = async () => {
+    const now = new Date();
 
-    const diffMs = target - ukNow;
+    // Get current UK time components
+    const uk = getUKTime();
+
+    // Build a UTC Date that represents "today HH:MM UK"
+    // by computing how many ms until that UK time
+    const todayUKMidnightUTC = Date.UTC(uk.year, uk.month - 1, uk.day, 0, 0, 0, 0);
+    // UK offset in ms (handles BST/GMT automatically via getUKTime)
+    const ukOffsetMs = todayUKMidnightUTC - new Date(uk.year, uk.month - 1, uk.day, 0, 0, 0, 0).getTime();
+    // Actually easier: just compute seconds since UK midnight
+    const ukSecondsNow = uk.hour * 3600 + uk.minute * 60 + uk.second;
+    const targetSeconds = hour * 3600 + minute * 60;
+
+    let diffSeconds = targetSeconds - ukSecondsNow;
+    if (diffSeconds <= 0) diffSeconds += 86400; // push to tomorrow if already passed
+
+    const diffMs = diffSeconds * 1000;
     console.log(`⏰ [${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')} UK] fires in ${Math.round(diffMs/1000/60)} min`);
 
-    setTimeout(() => { callback(); fire(); }, diffMs);
+    setTimeout(async () => {
+      try { await callback(); } catch (e) { console.error('Schedule callback error:', e.message); }
+      fire(); // reschedule for next day
+    }, diffMs);
   };
   fire();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  POST HELPER — creates a roster and schedules its auto-close
+//  POST HELPER — posts a war roster and schedules its auto-close
 // ══════════════════════════════════════════════════════════════════════════════
 async function postWarRoster(channel, type, rosterName, customIdPrefix, closeHour, closeMinute) {
   const mainRoster = [], subsRoster = [];
-  const createdAt  = new Date();
+  const createdAt = new Date();
 
-  const ukNow   = new Date(createdAt.toLocaleString('en-GB', { timeZone: 'Europe/London' }));
-  const closeAt = new Date(ukNow);
-  closeAt.setHours(closeHour, closeMinute, 0, 0);
+  // Build closeAt as a real UTC Date representing closeHour:closeMinute UK time today
+  const uk = getUKTime();
+  const ukSecondsNow   = uk.hour * 3600 + uk.minute * 60 + uk.second;
+  const closeSeconds   = closeHour * 3600 + closeMinute * 60;
+  let   diffToCloseMs  = (closeSeconds - ukSecondsNow) * 1000;
+  if (diffToCloseMs <= 0) diffToCloseMs += 86400 * 1000; // next day if already passed
+
+  // closeAt is used for display only — we store it as a Date offset from now
+  const closeAt = new Date(createdAt.getTime() + diffToCloseMs);
 
   const msg   = await channel.send(buildWarEmbed(rosterName, customIdPrefix, mainRoster, subsRoster, createdAt, closeAt));
   const msgId = msg.id;
   rosters.set(msgId, { type, mainRoster, subsRoster, closed: false, channelId: channel.id, createdAt, closeAt });
-  console.log(`📋 ${rosterName} posted — closes at ${closeHour}:${String(closeMinute).padStart(2,'0')} UK`);
+  console.log(`📋 ${rosterName} posted — closes in ${Math.round(diffToCloseMs/1000/60)} min`);
 
-  const msUntilClose = closeAt - ukNow;
-  setTimeout(() => closeRoster(msgId), msUntilClose);
+  setTimeout(() => closeRoster(msgId), diffToCloseMs);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -334,62 +364,64 @@ async function postWarRoster(channel, type, rosterName, customIdPrefix, closeHou
 client.once('ready', async () => {
   console.log(`✅ Bot is online as ${client.user.tag}`);
 
-  const informalChannel  = await client.channels.fetch(INFORMAL_CHANNEL_ID).catch(() => null);
-  const bizwarChannel    = await client.channels.fetch(BIZWAR_CHANNEL_ID).catch(() => null);
-  const rpticketChannel  = await client.channels.fetch(RPTICKET_CHANNEL_ID).catch(() => null);
-  const ratingsChannel   = await client.channels.fetch(RATINGS_CHANNEL_ID).catch(() => null);
-  const vineyardChannel  = await client.channels.fetch(VINEYARD_CHANNEL_ID).catch(() => null);
-  const newweekChannel   = await client.channels.fetch(NEWWEEK_CHANNEL_ID).catch(() => null);
-  // foundry uses same channel object as ratings
+  const informalChannel = await client.channels.fetch(INFORMAL_CHANNEL_ID).catch(() => null);
+  const bizwarChannel   = await client.channels.fetch(BIZWAR_CHANNEL_ID).catch(() => null);
+  const rpticketChannel = await client.channels.fetch(RPTICKET_CHANNEL_ID).catch(() => null);
+  const ratingsChannel  = await client.channels.fetch(RATINGS_CHANNEL_ID).catch(() => null); // also used for foundry
+  const vineyardChannel = await client.channels.fetch(VINEYARD_CHANNEL_ID).catch(() => null);
+  const newweekChannel  = await client.channels.fetch(NEWWEEK_CHANNEL_ID).catch(() => null);
 
-  if (!informalChannel)  console.error('❌ Cannot find informal channel');
-  if (!bizwarChannel)    console.error('❌ Cannot find bizwar channel');
-  if (!rpticketChannel)  console.error('❌ Cannot find rp-ticket channel');
-  if (!ratingsChannel)   console.error('❌ Cannot find ratings/foundry channel');
-  if (!vineyardChannel)  console.error('❌ Cannot find vineyard channel');
-  if (!newweekChannel)   console.error('❌ Cannot find new week channel');
+  if (!informalChannel) console.error('❌ Cannot find informal channel');
+  if (!bizwarChannel)   console.error('❌ Cannot find bizwar channel');
+  if (!rpticketChannel) console.error('❌ Cannot find rp-ticket channel');
+  if (!ratingsChannel)  console.error('❌ Cannot find ratings/foundry channel');
+  if (!vineyardChannel) console.error('❌ Cannot find vineyard channel');
+  if (!newweekChannel)  console.error('❌ Cannot find new week channel');
 
-  // ── INFORMAL: every hour at :25 ──────────────────────────────────────────
+  // ── INFORMAL: every hour at :25 UK ───────────────────────────────────────
   if (informalChannel) {
     const scheduleInformal = () => {
-      const now  = new Date();
-      const next = new Date();
-      next.setMinutes(25, 0, 0);
-      if (now.getMinutes() >= 25) next.setHours(next.getHours() + 1);
-      const ms = next - now;
-      console.log(`⏰ Next informal roster in ${Math.round(ms/1000/60)} min`);
+      const uk = getUKTime();
+      const secondsNow    = uk.hour * 3600 + uk.minute * 60 + uk.second;
+      const secondsTarget = uk.hour * 3600 + 25 * 60; // this hour at :25
+      let diffMs = (secondsTarget - secondsNow) * 1000;
+      if (diffMs <= 0) diffMs += 3600 * 1000; // next hour if :25 already passed
+
+      console.log(`⏰ Next informal roster in ${Math.round(diffMs/1000/60)} min`);
       setTimeout(async () => {
-        const mainRoster = [];
-        const msg = await informalChannel.send(buildInformalEmbed(mainRoster, new Date()));
-        rosters.set(msg.id, { type: 'informal', mainRoster, closed: false, channelId: informalChannel.id, createdAt: new Date() });
-        console.log(`📋 Informal roster posted`);
+        try {
+          const mainRoster = [];
+          const msg = await informalChannel.send(buildInformalEmbed(mainRoster, new Date()));
+          rosters.set(msg.id, { type: 'informal', mainRoster, closed: false, channelId: informalChannel.id, createdAt: new Date() });
+          console.log(`📋 Informal roster posted`);
+        } catch (e) { console.error('Failed to post informal roster:', e.message); }
         scheduleInformal();
-      }, ms);
+      }, diffMs);
     };
     scheduleInformal();
   }
 
-  // ── BIZWAR: 18:30 UK → 19:15 | 00:30 UK → 01:20 ─────────────────────────
+  // ── BIZWAR: 18:30 UK → closes 19:15 | 00:30 UK → closes 01:20 ───────────
   if (bizwarChannel) {
-    scheduleDaily(18, 30, () => postWarRoster(bizwarChannel,  'bizwar',   'BizWar Roster',     'bizwar',   19, 15));
-    scheduleDaily(0,  30, () => postWarRoster(bizwarChannel,  'bizwar',   'BizWar Roster',     'bizwar',   1,  20));
+    scheduleDaily(18, 30, () => postWarRoster(bizwarChannel,  'bizwar',   'BizWar Roster',    'bizwar',   19, 15));
+    scheduleDaily(0,  30, () => postWarRoster(bizwarChannel,  'bizwar',   'BizWar Roster',    'bizwar',   1,  20));
   }
 
-  // ── RP-TICKET: 9:55 → 10:45 | 15:55 → 16:45 | 21:55 → 22:45 ────────────
+  // ── RP-TICKET: 09:55 → 10:45 | 15:55 → 16:45 | 21:55 → 22:45 UK ────────
   if (rpticketChannel) {
-    scheduleDaily(9,  55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster',  'rpticket', 10, 45));
-    scheduleDaily(15, 55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster',  'rpticket', 16, 45));
-    scheduleDaily(21, 55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster',  'rpticket', 22, 45));
+    scheduleDaily(9,  55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster', 'rpticket', 10, 45));
+    scheduleDaily(15, 55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster', 'rpticket', 16, 45));
+    scheduleDaily(21, 55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster', 'rpticket', 22, 45));
   }
 
-  // ── RATINGS: 20:10 UK → 21:10 ────────────────────────────────────────────
-  // ── FOUNDRY: 13:50 UK → 14:50  (same channel) ────────────────────────────
+  // ── RATINGS:    20:10 UK → closes 21:10 ──────────────────────────────────
+  // ── THE FOUNDRY: 13:50 UK → closes 14:50 (same channel) ─────────────────
   if (ratingsChannel) {
-    scheduleDaily(20, 10, () => postWarRoster(ratingsChannel, 'ratings',  'Ratings-Roster',    'ratings',  21, 10));
-    scheduleDaily(13, 50, () => postWarRoster(ratingsChannel, 'foundry',  'The Foundry-Roster', 'foundry',  14, 50));
+    scheduleDaily(20, 10, () => postWarRoster(ratingsChannel, 'ratings', 'Ratings-Roster',    'ratings', 21, 10));
+    scheduleDaily(13, 50, () => postWarRoster(ratingsChannel, 'foundry', 'The Foundry-Roster', 'foundry', 14, 50));
   }
 
-  // ── VINEYARD: 19:40 UK → 20:40 ───────────────────────────────────────────
+  // ── VINEYARD: 19:40 UK → closes 20:40 ────────────────────────────────────
   if (vineyardChannel) {
     scheduleDaily(19, 40, () => postWarRoster(vineyardChannel, 'vineyard', 'Vineyard-Roster', 'vineyard', 20, 40));
   }
@@ -397,27 +429,28 @@ client.once('ready', async () => {
   // ── NEW WEEK: every Monday at 04:00 UK ───────────────────────────────────
   if (newweekChannel) {
     const scheduleNewWeek = () => {
-      const now    = new Date();
-      const ukNow  = new Date(now.toLocaleString('en-GB', { timeZone: 'Europe/London' }));
-      const target = new Date(ukNow);
+      const uk = getUKTime();
 
-      // Find next Monday
-      const daysUntilMonday = (1 - ukNow.getDay() + 7) % 7 || 7; // 1 = Monday
-      target.setDate(ukNow.getDate() + daysUntilMonday);
-      target.setHours(4, 0, 0, 0);
+      // Seconds since UK midnight right now
+      const secondsNow = uk.hour * 3600 + uk.minute * 60 + uk.second;
+      // Seconds since UK midnight for target (Monday 04:00)
+      const targetSeconds = 4 * 3600;
 
-      // If it's already Monday and before 4AM, post today
-      if (ukNow.getDay() === 1 && ukNow.getHours() < 4) {
-        target.setDate(ukNow.getDate());
-      }
+      // Days until next Monday (0 = Sunday, 1 = Monday ... 6 = Saturday)
+      let daysUntilMonday = (1 - uk.dayOfWeek + 7) % 7;
+      // If today IS Monday but 04:00 hasn't passed yet, fire today
+      // If today IS Monday and 04:00 already passed, fire next Monday (7 days)
+      if (daysUntilMonday === 0 && secondsNow >= targetSeconds) daysUntilMonday = 7;
 
-      const diffMs = target - ukNow;
+      const diffMs = (daysUntilMonday * 86400 + targetSeconds - secondsNow) * 1000;
       console.log(`⏰ [NEW WEEK] fires in ${Math.round(diffMs/1000/60/60)} hours`);
 
       setTimeout(async () => {
-        await newweekChannel.send('-------------------------------------------- NEW WEEK --------------------------------------------');
-        console.log('📅 New week message sent');
-        scheduleNewWeek(); // reschedule for next Monday
+        try {
+          await newweekChannel.send('-------------------------------------------- NEW WEEK --------------------------------------------');
+          console.log('📅 New week message sent');
+        } catch (e) { console.error('Failed to send new week message:', e.message); }
+        scheduleNewWeek();
       }, diffMs);
     };
     scheduleNewWeek();
