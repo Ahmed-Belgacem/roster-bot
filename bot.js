@@ -10,6 +10,9 @@ const TOKEN = process.env.TOKEN;
 const INFORMAL_CHANNEL_ID  = '1473037750713454712';
 const BIZWAR_CHANNEL_ID    = '1472887381723058248';
 const RPTICKET_CHANNEL_ID  = '1472887418138132550';
+const RATINGS_CHANNEL_ID   = '1472887535997947934';
+const FOUNDRY_CHANNEL_ID   = '1472887535997947934'; // same channel as ratings
+const VINEYARD_CHANNEL_ID  = '1472887509502529708';
 
 // ─── Roster storage ────────────────────────────────────────────────────────────
 const rosters = new Map();
@@ -52,7 +55,7 @@ function buildInformalEmbed(mainRoster, createdAt, closed = false) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  SHARED: builds a 25+10 roster embed (used by BizWar AND RP-Ticket)
+//  SHARED: builds a 25+10 roster embed
 // ══════════════════════════════════════════════════════════════════════════════
 function buildWarEmbed(name, customIdPrefix, mainRoster, subsRoster, createdAt, closeAt, closed = false) {
   const mainLines = [];
@@ -123,10 +126,31 @@ client.on('messageCreate', async (message) => {
     rosters.set(msg.id, { type: 'rpticket', mainRoster, subsRoster, closed: false, channelId: message.channel.id, createdAt });
     message.delete().catch(() => {});
   }
+
+  if (message.content === '!ratings') {
+    const mainRoster = [], subsRoster = [], createdAt = new Date();
+    const msg = await message.channel.send(buildWarEmbed('Ratings-Roster', 'ratings', mainRoster, subsRoster, createdAt, null));
+    rosters.set(msg.id, { type: 'ratings', mainRoster, subsRoster, closed: false, channelId: message.channel.id, createdAt });
+    message.delete().catch(() => {});
+  }
+
+  if (message.content === '!foundry') {
+    const mainRoster = [], subsRoster = [], createdAt = new Date();
+    const msg = await message.channel.send(buildWarEmbed('The Foundry-Roster', 'foundry', mainRoster, subsRoster, createdAt, null));
+    rosters.set(msg.id, { type: 'foundry', mainRoster, subsRoster, closed: false, channelId: message.channel.id, createdAt });
+    message.delete().catch(() => {});
+  }
+
+  if (message.content === '!vineyard') {
+    const mainRoster = [], subsRoster = [], createdAt = new Date();
+    const msg = await message.channel.send(buildWarEmbed('Vineyard-Roster', 'vineyard', mainRoster, subsRoster, createdAt, null));
+    rosters.set(msg.id, { type: 'vineyard', mainRoster, subsRoster, closed: false, channelId: message.channel.id, createdAt });
+    message.delete().catch(() => {});
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  SHARED JOIN/LEAVE HANDLER  (works for any type using the buildWarEmbed)
+//  SHARED JOIN/LEAVE HANDLER
 // ══════════════════════════════════════════════════════════════════════════════
 async function handleWarJoin(interaction, data, rosterName, customIdPrefix) {
   const userId   = interaction.user.id;
@@ -214,6 +238,24 @@ client.on('interactionCreate', async (interaction) => {
     return handleWarJoin(interaction, data, 'RP-Ticket Roster', 'rpticket');
   if (interaction.customId === 'rpticket_leave')
     return handleWarLeave(interaction, data, 'RP-Ticket Roster', 'rpticket');
+
+  // ── RATINGS ──
+  if (interaction.customId === 'ratings_join')
+    return handleWarJoin(interaction, data, 'Ratings-Roster', 'ratings');
+  if (interaction.customId === 'ratings_leave')
+    return handleWarLeave(interaction, data, 'Ratings-Roster', 'ratings');
+
+  // ── THE FOUNDRY ──
+  if (interaction.customId === 'foundry_join')
+    return handleWarJoin(interaction, data, 'The Foundry-Roster', 'foundry');
+  if (interaction.customId === 'foundry_leave')
+    return handleWarLeave(interaction, data, 'The Foundry-Roster', 'foundry');
+
+  // ── VINEYARD ──
+  if (interaction.customId === 'vineyard_join')
+    return handleWarJoin(interaction, data, 'Vineyard-Roster', 'vineyard');
+  if (interaction.customId === 'vineyard_leave')
+    return handleWarLeave(interaction, data, 'Vineyard-Roster', 'vineyard');
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -227,12 +269,18 @@ async function closeRoster(msgId) {
   try {
     const ch  = await client.channels.fetch(data.channelId);
     const msg = await ch.messages.fetch(msgId);
+
     if (data.type === 'informal') {
       await msg.edit(buildInformalEmbed(data.mainRoster, data.createdAt, true));
-    } else if (data.type === 'bizwar') {
-      await msg.edit(buildWarEmbed('BizWar Roster', 'bizwar', data.mainRoster, data.subsRoster, data.createdAt, data.closeAt, true));
-    } else if (data.type === 'rpticket') {
-      await msg.edit(buildWarEmbed('RP-Ticket Roster', 'rpticket', data.mainRoster, data.subsRoster, data.createdAt, data.closeAt, true));
+    } else {
+      const nameMap = {
+        bizwar:   'BizWar Roster',
+        rpticket: 'RP-Ticket Roster',
+        ratings:  'Ratings-Roster',
+        foundry:  'The Foundry-Roster',
+        vineyard: 'Vineyard-Roster',
+      };
+      await msg.edit(buildWarEmbed(nameMap[data.type], data.type, data.mainRoster, data.subsRoster, data.createdAt, data.closeAt, true));
     }
     console.log(`🔒 Closed roster ${msgId}`);
   } catch (e) {
@@ -266,7 +314,7 @@ async function postWarRoster(channel, type, rosterName, customIdPrefix, closeHou
   const mainRoster = [], subsRoster = [];
   const createdAt  = new Date();
 
-  const ukNow  = new Date(createdAt.toLocaleString('en-GB', { timeZone: 'Europe/London' }));
+  const ukNow   = new Date(createdAt.toLocaleString('en-GB', { timeZone: 'Europe/London' }));
   const closeAt = new Date(ukNow);
   closeAt.setHours(closeHour, closeMinute, 0, 0);
 
@@ -288,10 +336,15 @@ client.once('ready', async () => {
   const informalChannel  = await client.channels.fetch(INFORMAL_CHANNEL_ID).catch(() => null);
   const bizwarChannel    = await client.channels.fetch(BIZWAR_CHANNEL_ID).catch(() => null);
   const rpticketChannel  = await client.channels.fetch(RPTICKET_CHANNEL_ID).catch(() => null);
+  const ratingsChannel   = await client.channels.fetch(RATINGS_CHANNEL_ID).catch(() => null);
+  const vineyardChannel  = await client.channels.fetch(VINEYARD_CHANNEL_ID).catch(() => null);
+  // foundry uses same channel object as ratings
 
   if (!informalChannel)  console.error('❌ Cannot find informal channel');
   if (!bizwarChannel)    console.error('❌ Cannot find bizwar channel');
   if (!rpticketChannel)  console.error('❌ Cannot find rp-ticket channel');
+  if (!ratingsChannel)   console.error('❌ Cannot find ratings/foundry channel');
+  if (!vineyardChannel)  console.error('❌ Cannot find vineyard channel');
 
   // ── INFORMAL: every hour at :25 ──────────────────────────────────────────
   if (informalChannel) {
@@ -313,17 +366,29 @@ client.once('ready', async () => {
     scheduleInformal();
   }
 
-  // ── BIZWAR: 18:30 UK → closes 19:15 | 00:30 UK → closes 01:20 ───────────
+  // ── BIZWAR: 18:30 UK → 19:15 | 00:30 UK → 01:20 ─────────────────────────
   if (bizwarChannel) {
-    scheduleDaily(18, 30, () => postWarRoster(bizwarChannel,   'bizwar',   'BizWar Roster',   'bizwar',   19, 15));
-    scheduleDaily(0,  30, () => postWarRoster(bizwarChannel,   'bizwar',   'BizWar Roster',   'bizwar',   1,  20));
+    scheduleDaily(18, 30, () => postWarRoster(bizwarChannel,  'bizwar',   'BizWar Roster',     'bizwar',   19, 15));
+    scheduleDaily(0,  30, () => postWarRoster(bizwarChannel,  'bizwar',   'BizWar Roster',     'bizwar',   1,  20));
   }
 
   // ── RP-TICKET: 9:55 → 10:45 | 15:55 → 16:45 | 21:55 → 22:45 ────────────
   if (rpticketChannel) {
-    scheduleDaily(9,  55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster', 'rpticket', 10, 45));
-    scheduleDaily(15, 55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster', 'rpticket', 16, 45));
-    scheduleDaily(21, 55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster', 'rpticket', 22, 45));
+    scheduleDaily(9,  55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster',  'rpticket', 10, 45));
+    scheduleDaily(15, 55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster',  'rpticket', 16, 45));
+    scheduleDaily(21, 55, () => postWarRoster(rpticketChannel, 'rpticket', 'RP-Ticket Roster',  'rpticket', 22, 45));
+  }
+
+  // ── RATINGS: 20:10 UK → 21:10 ────────────────────────────────────────────
+  // ── FOUNDRY: 13:50 UK → 14:50  (same channel) ────────────────────────────
+  if (ratingsChannel) {
+    scheduleDaily(20, 10, () => postWarRoster(ratingsChannel, 'ratings',  'Ratings-Roster',    'ratings',  21, 10));
+    scheduleDaily(13, 50, () => postWarRoster(ratingsChannel, 'foundry',  'The Foundry-Roster', 'foundry',  14, 50));
+  }
+
+  // ── VINEYARD: 19:40 UK → 20:40 ───────────────────────────────────────────
+  if (vineyardChannel) {
+    scheduleDaily(19, 40, () => postWarRoster(vineyardChannel, 'vineyard', 'Vineyard-Roster', 'vineyard', 20, 40));
   }
 });
 
