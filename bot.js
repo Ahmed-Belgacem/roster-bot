@@ -43,7 +43,7 @@ function getUKTime() {
 // ══════════════════════════════════════════════════════════════════════════════
 //  INFORMAL ROSTER  (10 slots, no subs, no auto-close)
 // ══════════════════════════════════════════════════════════════════════════════
-function buildInformalEmbed(mainRoster, createdAt, closed = false) {
+function buildInformalEmbed(mainRoster, createdAt, closeAt = null, closed = false) {
   const lines = [];
   for (let i = 1; i <= 10; i++) {
     const user = mainRoster[i - 1];
@@ -51,12 +51,15 @@ function buildInformalEmbed(mainRoster, createdAt, closed = false) {
   }
   const status = closed ? '🔴 CLOSED' : '🟢 Open';
   const color  = closed ? 0xED4245 : 0x57F287;
+  const closeStr = closeAt ? `\n**Auto closes:** ${formatTime(closeAt)} UK` : '';
 
   const embed = new EmbedBuilder()
     .setTitle(closed ? '🔒 Informal Roster (CLOSED)' : '✅ Informal Roster (First 10 Only)')
     .setDescription(
-      `**Main Roster (1–10)**\n${lines.join('\n')}\n\n` +
-      `Status: ${status} • Created: ${formatDate(createdAt)} • ${formatTime(createdAt)} UK`
+      `**Status:** ${status}\n` +
+      `**Created:** ${formatDate(createdAt)} • ${formatTime(createdAt)} UK` +
+      closeStr + `\n\n` +
+      `**Main Roster (1–10)**\n${lines.join('\n')}`
     )
     .setColor(color);
 
@@ -119,8 +122,8 @@ client.on('messageCreate', async (message) => {
 
   if (message.content === '!roster') {
     const mainRoster = [];
-    const msg = await message.channel.send(buildInformalEmbed(mainRoster, new Date()));
-    rosters.set(msg.id, { type: 'informal', mainRoster, closed: false, channelId: message.channel.id, createdAt: new Date() });
+    const msg = await message.channel.send(buildInformalEmbed(mainRoster, new Date(), null));
+    rosters.set(msg.id, { type: 'informal', mainRoster, closeAt: null, closed: false, channelId: message.channel.id, createdAt: new Date() });
     message.delete().catch(() => {});
   }
 
@@ -198,7 +201,7 @@ client.on('messageCreate', async (message) => {
     const reply = [
       `🕐 **Current UK time:** ${String(uk.hour).padStart(2, '0')}:${String(uk.minute).padStart(2, '0')}`,
       ``,
-      `📋 **Informal Roster** — next post ${nextInformal()} *(every hour at :25)*`,
+      `📋 **Informal Roster** — next post ${nextInformal()} *(closes at :45)*`,
       ``,
       `⚔️ **BizWar Roster**`,
       `　• 18:30 post → ${nextFire(18, 30)} *(closes 19:15)*`,
@@ -284,7 +287,7 @@ client.on('interactionCreate', async (interaction) => {
     if (data.mainRoster.length >= 10)
       return interaction.reply({ content: '❌ The roster is full (10/10)!', ephemeral: true });
     data.mainRoster.push({ id: userId, username });
-    await interaction.message.edit(buildInformalEmbed(data.mainRoster, data.createdAt, data.closed));
+    await interaction.message.edit(buildInformalEmbed(data.mainRoster, data.createdAt, data.closeAt, data.closed));
     return interaction.reply({ content: '✅ You\'ve been added to the roster!', ephemeral: true });
   }
   if (interaction.customId === 'informal_leave') {
@@ -292,7 +295,7 @@ client.on('interactionCreate', async (interaction) => {
     if (index === -1)
       return interaction.reply({ content: '⚠️ You\'re not on the roster.', ephemeral: true });
     data.mainRoster.splice(index, 1);
-    await interaction.message.edit(buildInformalEmbed(data.mainRoster, data.createdAt, data.closed));
+    await interaction.message.edit(buildInformalEmbed(data.mainRoster, data.createdAt, data.closeAt, data.closed));
     return interaction.reply({ content: '✅ You\'ve been removed from the roster.', ephemeral: true });
   }
 
@@ -327,7 +330,7 @@ async function closeRoster(msgId) {
     const ch  = await client.channels.fetch(data.channelId);
     const msg = await ch.messages.fetch(msgId);
     if (data.type === 'informal') {
-      await msg.edit(buildInformalEmbed(data.mainRoster, data.createdAt, true));
+      await msg.edit(buildInformalEmbed(data.mainRoster, data.createdAt, data.closeAt, true));
     } else {
       await msg.edit(buildWarEmbed(nameMap[data.type], data.type, data.mainRoster, data.subsRoster, data.createdAt, data.closeAt, true));
     }
@@ -403,7 +406,7 @@ client.once('clientReady', async () => {
   if (!newweekChannel)  console.error('❌ Cannot find new week channel');
   if (!newweekChannel2) console.error('❌ Cannot find new week channel 2');
 
-  // ── INFORMAL: every hour at :25 ──────────────────────────────────────────
+  // ── INFORMAL: posts at :25, closes at :45 every hour ────────────────────
   if (informalChannel) {
     const scheduleInformal = () => {
       const uk = getUKTime();
@@ -414,9 +417,21 @@ client.once('clientReady', async () => {
       setTimeout(async () => {
         try {
           const mainRoster = [];
-          const msg = await informalChannel.send(buildInformalEmbed(mainRoster, new Date()));
-          rosters.set(msg.id, { type: 'informal', mainRoster, closed: false, channelId: informalChannel.id, createdAt: new Date() });
-          console.log(`📋 Informal roster posted`);
+          const createdAt = new Date();
+          
+          // Calculate closeAt: :45 of this hour (20 minutes after :25)
+          const ukNow = getUKTime();
+          const closeSecondsNow = ukNow.hour * 3600 + ukNow.minute * 60 + ukNow.second;
+          const closeSecondsTarget = ukNow.hour * 3600 + 45 * 60;
+          const diffToClose = (closeSecondsTarget - closeSecondsNow) * 1000;
+          const closeAt = new Date(Date.now() + diffToClose);
+
+          const msg = await informalChannel.send(buildInformalEmbed(mainRoster, createdAt, closeAt));
+          rosters.set(msg.id, { type: 'informal', mainRoster, closeAt, closed: false, channelId: informalChannel.id, createdAt });
+          console.log(`📋 Informal roster posted — closes in ${Math.round(diffToClose/60000)} min`);
+
+          // Schedule auto-close at :45
+          setTimeout(() => closeRoster(msg.id), diffToClose);
         } catch (e) { console.error('Failed to post informal:', e.message); }
         scheduleInformal();
       }, diff * 1000);
