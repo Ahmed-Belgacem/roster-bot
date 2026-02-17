@@ -13,6 +13,7 @@ const RPTICKET_CHANNEL_ID = '1472887418138132550';
 const RATINGS_CHANNEL_ID  = '1472887535997947934'; // also used for The Foundry
 const VINEYARD_CHANNEL_ID = '1472887509502529708';
 const NEWWEEK_CHANNEL_ID  = '1472898791580373032';
+const NEWWEEK_CHANNEL_ID2 = '1473237583340376085';
 
 // ─── Roster storage ────────────────────────────────────────────────────────────
 const rosters = new Map();
@@ -392,6 +393,7 @@ client.once('ready', async () => {
   const ratingsChannel  = await client.channels.fetch(RATINGS_CHANNEL_ID).catch(() => null);
   const vineyardChannel = await client.channels.fetch(VINEYARD_CHANNEL_ID).catch(() => null);
   const newweekChannel  = await client.channels.fetch(NEWWEEK_CHANNEL_ID).catch(() => null);
+  const newweekChannel2 = await client.channels.fetch(NEWWEEK_CHANNEL_ID2).catch(() => null);
 
   if (!informalChannel) console.error('❌ Cannot find informal channel');
   if (!bizwarChannel)   console.error('❌ Cannot find bizwar channel');
@@ -399,6 +401,7 @@ client.once('ready', async () => {
   if (!ratingsChannel)  console.error('❌ Cannot find ratings/foundry channel');
   if (!vineyardChannel) console.error('❌ Cannot find vineyard channel');
   if (!newweekChannel)  console.error('❌ Cannot find new week channel');
+  if (!newweekChannel2) console.error('❌ Cannot find new week channel 2');
 
   // ── INFORMAL: every hour at :25 ──────────────────────────────────────────
   if (informalChannel) {
@@ -457,6 +460,7 @@ client.once('ready', async () => {
       setTimeout(async () => {
         try {
           await newweekChannel.send('-------------------------------------------- NEW WEEK --------------------------------------------');
+          if (newweekChannel2) await newweekChannel2.send('-------------------------------------------- NEW WEEK --------------------------------------------');
           console.log('📅 New week message sent');
         } catch (e) { console.error('Failed to send new week:', e.message); }
         scheduleNewWeek();
