@@ -486,7 +486,6 @@ client.once('clientReady', async () => {
     }
 
     // Daily events
-    scheduleDaily(14,  54, () => announceEvent('Harbor'));
     scheduleDaily(7,  10, () => announceEvent('Harbor'));
     scheduleDaily(10,  0, () => announceEvent('Drug Lab'));
     scheduleDaily(10, 10, () => announceEvent('Harbor'));
