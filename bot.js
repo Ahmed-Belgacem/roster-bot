@@ -14,6 +14,7 @@ const RATINGS_CHANNEL_ID  = '1472887535997947934'; // also used for The Foundry
 const VINEYARD_CHANNEL_ID = '1472887509502529708';
 const NEWWEEK_CHANNEL_ID  = '1472898791580373032';
 const NEWWEEK_CHANNEL_ID2 = '1473237583340376085';
+const EVENTS_CHANNEL_ID   = '1473230268272869489';
 
 // ─── Roster storage ────────────────────────────────────────────────────────────
 const rosters = new Map();
@@ -397,6 +398,7 @@ client.once('clientReady', async () => {
   const vineyardChannel = await client.channels.fetch(VINEYARD_CHANNEL_ID).catch(() => null);
   const newweekChannel  = await client.channels.fetch(NEWWEEK_CHANNEL_ID).catch(() => null);
   const newweekChannel2 = await client.channels.fetch(NEWWEEK_CHANNEL_ID2).catch(() => null);
+  const eventsChannel   = await client.channels.fetch(EVENTS_CHANNEL_ID).catch(() => null);
 
   if (!informalChannel) console.error('❌ Cannot find informal channel');
   if (!bizwarChannel)   console.error('❌ Cannot find bizwar channel');
@@ -405,6 +407,7 @@ client.once('clientReady', async () => {
   if (!vineyardChannel) console.error('❌ Cannot find vineyard channel');
   if (!newweekChannel)  console.error('❌ Cannot find new week channel');
   if (!newweekChannel2) console.error('❌ Cannot find new week channel 2');
+  if (!eventsChannel)   console.error('❌ Cannot find events channel');
 
   // ── INFORMAL: posts at :25, closes at :45 every hour ────────────────────
   if (informalChannel) {
@@ -463,6 +466,51 @@ client.once('clientReady', async () => {
     scheduleDaily(19, 40, () => postWarRoster(vineyardChannel, 'vineyard', 'Vineyard-Roster', 'vineyard', 20, 40));
   }
 
+  // ── EVENT ANNOUNCEMENTS ──────────────────────────────────────────────────
+  if (eventsChannel) {
+    async function announceEvent(eventName) {
+      try {
+        await eventsChannel.send(`@everyone COME IN GAME WE HAVE A VERY IMPORTANT EVENT ${eventName}`);
+        console.log(`📢 Event announced: ${eventName}`);
+      } catch (e) { console.error(`Failed to announce ${eventName}:`, e.message); }
+    }
+
+    // Helper for day-specific events (0=Sunday, 1=Monday, ..., 6=Saturday)
+    function scheduleDaySpecific(hour, minute, eventName, allowedDays) {
+      scheduleDaily(hour, minute, async () => {
+        const uk = getUKTime();
+        if (allowedDays.includes(uk.dayOfWeek)) {
+          await announceEvent(eventName);
+        }
+      });
+    }
+
+    // Daily events
+    scheduleDaily(7,  10, () => announceEvent('Harbor'));
+    scheduleDaily(10,  0, () => announceEvent('Drug Lab'));
+    scheduleDaily(10, 10, () => announceEvent('Harbor'));
+    scheduleDaily(13, 10, () => announceEvent('Harbor'));
+    scheduleDaily(16, 10, () => announceEvent('Harbor'));
+    scheduleDaily(16, 30, () => announceEvent('Factory of RP tickets'));
+    scheduleDaily(17, 15, () => announceEvent('Mall (17:15 registration, 17:20 defense side goes in, 17:25 attack side goes in)'));
+    scheduleDaily(19,  5, () => announceEvent('Business War - PRIORITY'));
+    scheduleDaily(19, 10, () => announceEvent('Harbor'));
+    scheduleDaily(20, 30, () => announceEvent('Leftover Components - PRIORITY'));
+    scheduleDaily(20, 50, () => announceEvent('Rating Battle - PRIORITY'));
+    scheduleDaily(21, 30, () => announceEvent('Aircraft Carrier - PRIORITY'));
+    scheduleDaily(22, 10, () => announceEvent('Harbor'));
+    scheduleDaily(22, 30, () => announceEvent('Factory of RP tickets'));
+    scheduleDaily(1,   5, () => announceEvent('Business War - PRIORITY'));
+    scheduleDaily(1,  10, () => announceEvent('Harbor'));
+    scheduleDaily(2,  20, () => announceEvent('Hotel Takeover'));
+    scheduleDaily(4,  10, () => announceEvent('Harbor'));
+
+    // Day-specific events
+    scheduleDaySpecific(20, 20, 'Attacking Prison - PRIORITY', [5]); // Friday only
+    scheduleDaySpecific(20, 20, 'King Of Cayo Perico Island - PRIORITY', [0, 3]); // Sunday & Wednesday
+    scheduleDaySpecific(21, 30, 'Bank Robbery - PRIORITY', [1, 3, 6]); // Monday, Wednesday, Saturday
+  }
+
   // ── NEW WEEK: every Monday at 04:00 UK ───────────────────────────────────
   if (newweekChannel) {
     const scheduleNewWeek = () => {
@@ -474,8 +522,8 @@ client.once('clientReady', async () => {
       console.log(`⏰ [NEW WEEK] fires in ${Math.round(diffSeconds/3600)} hours`);
       setTimeout(async () => {
         try {
-          await newweekChannel.send('-------------------------------------------- NEW WEEK --------------------------------------------');
-          if (newweekChannel2) await newweekChannel2.send('-------------------------------------------- NEW WEEK --------------------------------------------');
+          await newweekChannel.send('------------------------------------------------------------ NEW WEEK ------------------------------------------------------------');
+          if (newweekChannel2) await newweekChannel2.send('------------------------------------------------------------ NEW WEEK ------------------------------------------------------------');
           console.log('📅 New week message sent');
         } catch (e) { console.error('Failed to send new week:', e.message); }
         scheduleNewWeek();
